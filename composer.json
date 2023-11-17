@@ -1,0 +1,19 @@
+{
+  "name": "hfebles/reportes",
+  "type": "project",
+  "authors": [
+    {
+      "name": "Jesus Hernandez Febles",
+      "email": "jehfebles@gmail.com"
+    }
+  ],
+  "minimum-stability": "beta",
+  "require": {
+    "vlucas/phpdotenv": "^5.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "App\\": "app/"
+    }
+  }
+}
