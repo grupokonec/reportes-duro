@@ -2,65 +2,94 @@
 
 namespace App\Controllers;
 
-use App\Models\Connection;
+use App\Models\Connection; // llamamos a la clase que contiene la conexion
 
 
 class RegistroContactoController
 {
 
-
-    //llamada solo es 
-    //agente o titular nada enviado
-
-
-
-    public function getData($fecha = '', $canal = [], $limit = 10) // ! cambiar el limit a = '', de momento solo es pruebas
+    public function getData(string $fecha)
     {
-        $conn = new Connection;
+        $conn = new Connection; // Instanciamos la conexion.
 
+        // Instancamos la lista negra, nos retorna un arreglo con los numeros de telefonos de la lista negra.
+        $rst_ln = ListaNegraController::getDatos();
+
+        // Creamos un arreglo separado por comas con los valores.
+        $not_in = implode(', ', array_map(function ($value) {
+            return "'$value'";
+        }, $rst_ln));
+
+        //Consultamos si la fecha no viene vacia
         if (strlen($fecha) > 0) {
+            // Armamos la query
             $query = "SELECT
-                        rc.rut,
-                rc.telefono,
-                rc.nopago,
-                rc.idrespuesta,
-                rc.modo,
-                rc.fecha,
-                rc.feccomp,
-                        c.IDEmpresaCobranza, c.MesAsignacion, c.Segmento, c.IDCampana, c.IDGrupoControl, c.Contrato
-                        FROM (SELECT * FROM registro_contacto WHERE date(fecha)='$fecha' AND telefono != 'MANUAL') rc
-                        INNER JOIN (
-                            SELECT
-                                c1.rutsd,
-                                MAX(c1.IDEmpresaCobranza) AS IDEmpresaCobranza,
-                                MAX(c1.MesAsignacion) AS MesAsignacion,
-                                MAX(c1.Segmento) AS Segmento,
-                                MAX(c1.IDCampana) AS IDCampana,
-                                MAX(c1.IDGrupoControl) AS IDGrupoControl,
-                                MAX(c1.Contrato) AS Contrato
-                            FROM
-                                bdcl22.cartera_primer_dia c1
-                            GROUP BY c1.RUTSD
-                        ) AS c ON rc.rut = c.rutsd";
+                            rc.rut,
+                            rc.telefono,
+                            rc.nopago,
+                            rc.idrespuesta,
+                            rc.modo,
+                            rc.fecha,
+                            rc.feccomp,
+                            c.IDEmpresaCobranza,
+                            c.MesAsignacion,
+                            c.Segmento,
+                            c.IDCampana,
+                            c.IDGrupoControl,
+                            c.Contrato
+                        FROM
+	                        (
+                                SELECT
+                                    *
+                                FROM
+                                    registro_contacto
+                                WHERE
+                                    date(fecha) = '$fecha'
+                                AND telefono != 'MANUAL'
+                                AND telefono NOT IN ($not_in)
+                                ) rc
+                                INNER JOIN (
+                                    SELECT
+                                        c1.rutsd,
+                                        MAX(c1.IDEmpresaCobranza) AS IDEmpresaCobranza,
+                                        MAX(c1.MesAsignacion) AS MesAsignacion,
+                                        MAX(c1.Segmento) AS Segmento,
+                                        MAX(c1.IDCampana) AS IDCampana,
+                                        MAX(c1.IDGrupoControl) AS IDGrupoControl,
+                                        MAX(c1.Contrato) AS Contrato
+                                    FROM
+                                        bdcl22.cartera_primer_dia c1
+                                    GROUP BY
+                                        c1.RUTSD
+                                ) AS c ON rc.rut = c.rutsd";
         }
 
-        // return $query;
+        // Ejecutamos la consulta.
         $resultados = $conn->queryExe($query);
 
+        //Retornamos los resultados
         return $resultados;
     }
 
 
-    public function validar($fecha)
+    public function validar(string $fecha)
     {
 
+        // Hacemos la peticion de la data, instanciando al metodo getData y le pasamos como parametro el string con la fecha.
         $res = $this->getData($fecha);
 
+        // Declaramos un arreglo vacio, que va a contener los registros formateados.
         $arr_rc = [];
 
+
+        // Iniciamos el recorrido. 
         foreach ($res as $key_rc => $row_rc) {
+            //Validamos que no venga el telefono tenga un largo de 9 digitos
             if (preg_match('/^\d{9}$/', $row_rc->telefono)) {
+                //Validamos que la respuesta no sea erronea
                 if ($row_rc->idrespuesta != '555') {
+
+                    // Declaramos las variables con los datos a rellenar en vacio.
                     $ID_ACCION = '';
                     $ID_NIVEL_UNO = '';
                     $ID_NIVEL_DOS = '';
@@ -70,6 +99,7 @@ class RegistroContactoController
                     $COBRADOR = '';
 
 
+                    // Seleccionamos el modo.
                     switch ($row_rc->modo) {
                         case 'INBOUND':
                             $COBRADOR = '106';
@@ -92,6 +122,8 @@ class RegistroContactoController
                     $CLASIFICACION =  $row_rc->nopago;
                     $OBSERVACION =  $row_rc->idrespuesta;
 
+
+                    // Segun el arbol y el tipo de respuesta encontrado comenzamos a validar para continuar la asignacion de variables.
                     if (
                         ($row_rc->idrespuesta == '050' ||
                             $row_rc->idrespuesta == '051' ||
@@ -121,11 +153,20 @@ class RegistroContactoController
                         $ID_NIVEL_UNO = '016';
                         $ID_NIVEL_DOS = '023';
                         $ID_NIVEL_TRES = '036';
-                    } elseif ($row_rc->idrespuesta == '058' && $ID_ACCION != '001') {
+                        if ($ID_ACCION == '001') {
+                            $CLASIFICACION = '';
+                        }
+                    } elseif (
+                        ($row_rc->idrespuesta == '058' && ($ID_ACCION != '001' || $ID_ACCION != '009')) ||
+                        ($ID_ACCION == '008' && $row_rc->nopago == '095' && $row_rc->idrespuesta == '090')
+                    ) {
                         $ID_NIVEL_UNO = '017';
                         $ID_NIVEL_DOS = '022';
                         $ID_NIVEL_TRES = '037';
                         $CLASIFICACION = '';
+                        if ($ID_ACCION == '008') {
+                            $OBSERVACION = '058';
+                        }
                     } elseif ($row_rc->idrespuesta == '062' || $row_rc->idrespuesta == '065' || $row_rc->idrespuesta == '066') {
                         $ID_NIVEL_UNO = '016';
                         $ID_NIVEL_DOS = '022';
@@ -133,18 +174,43 @@ class RegistroContactoController
                         $CLASIFICACION = '';
                     }
 
-                    if ($row_rc->idrespuesta == '090' && ($ID_ACCION != '009' && $ID_ACCION != '001')) {
+                    if (($row_rc->idrespuesta == '090' && $ID_ACCION == '009') || ($row_rc->nopago == '095' && $ID_ACCION == '009')) {
+                        $ID_NIVEL_UNO = '017';
+                        $ID_NIVEL_DOS = '021';
+                        $ID_NIVEL_TRES = '038';
+
+                        $CLASIFICACION = '';
+                        $OBSERVACION = '';
+                    }
+
+
+
+
+
+                    if ($row_rc->idrespuesta == '090' &&  $ID_ACCION != '009' || ($ID_ACCION == '001' && $row_rc->idrespuesta == '058')) {
                         $ID_NIVEL_UNO = '017';
                         $ID_NIVEL_DOS = '026';
                         $ID_NIVEL_TRES = '038';
-                    } elseif ($row_rc->idrespuesta == '051' && ($ID_ACCION != '009' && $ID_ACCION != '001')) {
+                        if ($ID_ACCION == '001') {
+                            $CLASIFICACION = '';
+                            $OBSERVACION = '';
+                        }
+                    } elseif ($row_rc->idrespuesta == '051' && ($ID_ACCION != '009')) {
                         $ID_NIVEL_UNO = '016';
                         $ID_NIVEL_DOS = '024';
                         $ID_NIVEL_TRES = '038';
-                    } elseif (($row_rc->idrespuesta == '053' || $row_rc->idrespuesta == '050') && ($ID_ACCION != '009' && $ID_ACCION != '008' && $ID_ACCION != '001')) {
+                        if ($ID_ACCION == '001') {
+                            $CLASIFICACION = '';
+                            $OBSERVACION = '';
+                        }
+                    } elseif (($row_rc->idrespuesta == '053' || $row_rc->idrespuesta == '050') && ($ID_ACCION != '009' && $ID_ACCION != '008')) {
                         $ID_NIVEL_UNO = '016';
                         $ID_NIVEL_DOS = '027';
                         $ID_NIVEL_TRES = '036';
+                        if ($ID_ACCION == '001') {
+                            $CLASIFICACION = '';
+                            $OBSERVACION = '';
+                        }
                     } elseif ($row_rc->idrespuesta == '058' && ($ID_ACCION != '009' && $ID_ACCION != '001')) {
                         $ID_NIVEL_UNO = '016';
                         $ID_NIVEL_DOS = '027';
@@ -153,7 +219,7 @@ class RegistroContactoController
 
 
 
-
+                    // Armamos el arreglo con el registros
                     if ($ID_NIVEL_UNO != '') {
                         $arr_rc[$key_rc] = [
                             'ID_EMPRESA_COBRANZA' => $row_rc->IDEmpresaCobranza,
